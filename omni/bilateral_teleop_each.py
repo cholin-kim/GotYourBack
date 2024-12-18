@@ -3,7 +3,7 @@ import numpy as np
 from sensor_msgs.msg import JointState
 from omniKinematics import omniKinematics
 from omni_msgs.msg import OmniFeedback
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 
 class touch_syn():
