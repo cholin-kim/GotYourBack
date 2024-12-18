@@ -115,19 +115,17 @@ class CartesianCmd:
 
 
 if __name__ == '__main__':
-    SC = CartesianCmd(arm='R')
+    SC = CartesianCmd(arm='L')
     # targ_T = np.eye(4)
     # targ_T[:3, -1] = [0.4, 0, 0.5]
+    # targ_T[:3, :3] = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
     targ_T = np.copy(SC.get_cur_T())
-    targ_T[:3, :3] = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
-    # targ_T[2, -1] += +0.1
-    # targ_T[0, -1] += 0.01
+    targ_T[1, -1] += -0.01
+    targ_T[0, -1] += 0.01
 
     while not rospy.is_shutdown():
-        cur_T = SC.get_cur_T()
-        print(R.from_matrix(cur_T[:3, :3]).as_euler('ZYX', degrees=True))
 
-        # SC.set_pose_cmd(targ_T, duration=3)
+        SC.set_pose_cmd(targ_T, duration=5)
         # SC.set_pose_cmd(targ_T_2, duration=0.5)
         # SC.set_pose_cmd(targ_T_3, duration=0.5)
         # SC.set_pose_cmd(targ_T_4, duration=0.5)

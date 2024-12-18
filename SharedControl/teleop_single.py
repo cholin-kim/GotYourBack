@@ -7,7 +7,6 @@ from omni_msgs.msg import OmniButtonEvent
 import rospy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Slerp
 
 from omni.omniKinematics import omniKinematics
 from panda_kinematics.pandaKinematics import pandaKinematics
@@ -17,7 +16,7 @@ from phidget.FootPed import FootPed
 
 
 class TeleopShared_single:
-    def __init__(self, ns='R'):
+    def __init__(self, ns=''):
         if not rospy.get_node_uri():
             rospy.init_node('teleop_shared_cmd')
 
@@ -34,11 +33,11 @@ class TeleopShared_single:
             omni_name = '/omni2'
 
         self.panda_q_pos = np.array(rospy.wait_for_message(robot_name + '/franka_state_controller/joint_states', JointState).position)
-        self.omni_q_pos = np.array(rospy.wait_for_message(omni_name + '/omni/joint_states', JointState).position)
-        self.fr3_q_pos = np.array([0.17048346850224572, -1.293712737872761, 0.06968514096397062, -2.580994415207858, -0.0494678581914531, 2.063796008375581, 0.16949485500424583])
+        self.omni_q_pos = np.array(rospy.wait_for_message(omni_name + '/joint_states', JointState).position)
+        self.fr3_q_pos = np.array([0.3230508194141213, -1.1348287612256966, 0.21110954878309973, -2.1477468616621564, -0.20662960747218065, 1.6709500585526351, 0.458321223884512])
 
         rospy.Subscriber(robot_name + '/franka_state_controller/joint_states', JointState, queue_size=1, callback=self.panda_q_cb)
-        rospy.Subscriber(omni_name +'/omni/joint_states', JointState, queue_size=1, callback=self.omni_q_cb)
+        rospy.Subscriber(omni_name +'/joint_states', JointState, queue_size=1, callback=self.omni_q_cb)
         self.pedal_pub = rospy.Publisher('/footped', UInt8, queue_size=1)
 
         # Variablesz
@@ -48,20 +47,15 @@ class TeleopShared_single:
 
         self.init_flag = True
         self.joint_limit_alert = False
-        self.compliance_params_L = np.array([600, 20, 400, 15, 50, 5, 1.0])
-        self.compliance_flag = False
-        self.align_flag = False
+        self.compliance_params_L = np.array([600, 20, 400, 15, 80, 5, 0.0])
 
     def panda_q_cb(self, msg: JointState):
-        if self.init_flag:
-            pass
-        else:
-            self.compliance_params_L = np.array(list(self.CIC.get_compliance_params().values()))
+        self.compliance_params_L = np.array(list(self.CIC.get_compliance_params().values()))
         self.panda_q_pos = np.array(msg.position)
         joint_margin = np.abs((self.panda_q_pos - (pandaVar.q_min + pandaVar.q_max) / 2)) / (
                     (pandaVar.q_max - pandaVar.q_min) / 2)
         # print(joint_margin)
-        if (joint_margin[-1] > 0.6) or (joint_margin > 0.7).any() or self.compliance_flag:
+        if (joint_margin[-1] > 0.6) or (joint_margin > 0.7).any():
             if not self.init_flag:
                 self.compliance_params_L[[0, 4, 6]] = [100.0, 3.0, 0.0]  # 1/40
                 # self.compliance_params[[1, 3]] = [4, 0.2]                             # 1/5
@@ -72,15 +66,11 @@ class TeleopShared_single:
                 self.joint_limit_alert = True
         else:
             if self.joint_limit_alert:
-                if self.align_flag:
-                    self.compliance_params_L[[0, 2, 4, 6]] = self.compliance_params_L[[0, 2, 4, 6]] * 0.97 + np.array(
-                        [600, 100, 60, 1.0]) * 0.03
-                else:
-                    self.compliance_params_L[[0, 2, 4, 6]] = self.compliance_params_L[[0, 2, 4, 6]] * 0.97 + np.array(
-                        [600, 400, 50, 1.0]) * 0.03
+                self.compliance_params_L[[0, 4, 6]] = self.compliance_params_L[[0, 4, 6]] * 0.97 + np.array(
+                    [400, 50, 0.0]) * 0.03
                 # self.compliance_params[[1, 3]] = self.compliance_params[[1, 3]] * 0.95 + np.array([20, 5]) * 0.05
                 self.CIC.set_compliance_params(self.compliance_params_L)
-                if np.sum(self.compliance_params_L[[0, 4, 6]] - np.array([600, 60, 1.0])) >= 0:
+                if np.sum(self.compliance_params_L[[0, 4, 6]] - np.array([600, 50, 0.0])) >= 0:
                     print(
                         f"Config set to {self.compliance_params_L[0]}, {self.compliance_params_L[1]}, {self.compliance_params_L[2]}, {self.compliance_params_L[3]}, {self.compliance_params_L[4]}")
                     self.joint_limit_alert = False
@@ -108,64 +98,27 @@ class TeleopShared_single:
 
     def teleop(self):
         print('start')
-        flag_1 = True
-        flag_2 = True
+
         while not rospy.is_shutdown():
             msg = UInt8()
             msg.data = self.ped.get_pedal_state()[0]
             self.pedal_pub.publish(msg)
 
-            if abs(self.CIC.get_cur_T()[2, -1] - 0.27851) <= 0.15:
-                self.align_flag = True
-                if flag_1:
-                    self.compliance_flag = True
-                    flag_1 = False
-                else:
-                    self.compliance_flag = False
-
-            else:
-                self.align_flag = False
-                flag_1 = True
 
             if self.ped.get_pedal_state()[0] == 1:
                 Trb_ree_des = self.update_robot(m=self.omni_q_pos, s=self.panda_q_pos, sc=self.fr3_q_pos)
-                Trb_ree_shared = np.copy(Trb_ree_des)
-                if self.align_flag:
-                    print('align flag')
-                    Trb_ree_shared[:3, :3] = R.from_euler('ZYX', [90, 0, 180], degrees=True).as_matrix()
+                print(Trb_ree_des)
+                if self.init_flag:
+                    du = 1
+                    Ts = self.CIC.interpolate_pose(Trb_ree_des, duration=du)
+                    self.init_flag = False
+                    for i in range(len(Ts)):
+                        self.CIC.set_pose_cmd_direct(Ts[i])
+                        rospy.sleep(0.01)
 
-
-
-                T_diff = Trb_ree_shared @ np.linalg.inv(self.CIC.get_cur_T())
-                pos_diff = np.linalg.norm(np.abs(T_diff[:3, -1]))
-                ori_diff = np.linalg.norm(R.from_matrix(T_diff[:3, :3]).as_rotvec(degrees=True))
-
-                if ori_diff > 20:
-                    print('Large orientation difference!')
-                    if flag_2:
-                        self.compliance_flag = True
-                        flag_2 = False
-                    else:
-                        self.compliance_flag = False
                 else:
-                    flag_2 = True
-
-                Trb_ree_cmd = np.copy(Trb_ree_shared)
-
-                self.CIC.set_pose_cmd_direct(Trb_ree_cmd)
-                self.init_flag = False
-                # # print(Trb_ree_des)
-                # if self.init_flag:
-                #     du = 1
-                #     Ts = self.CIC.interpolate_pose(Trb_ree_des, duration=du)
-                #     self.init_flag = False
-                #     for i in range(len(Ts)):
-                #         self.CIC.set_pose_cmd_direct(Ts[i])
-                #         rospy.sleep(0.01)
-                #
-                # else:
-                #     self.CIC.set_pose_cmd_direct(Trb_ree_des)
-                #     pass
+                    self.CIC.set_pose_cmd_direct(Trb_ree_des)
+                    pass
 
             elif self.ped.get_pedal_state()[0] == 0:
                 self.init_flag = True
