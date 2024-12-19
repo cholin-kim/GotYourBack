@@ -25,10 +25,7 @@ class CartesianCmd:
         self.joint_stiffness_param_name = self.robot_name + '/teleop_shared_controller/k_gains'
         self.carte_stiffness_param_name = self.robot_name + '/teleop_shared_controller/cartesian_stiffness'
         self.carte_damping_param_name = self.robot_name + '/teleop_shared_controller/cartesian_damping'
-        rospy.Subscriber(self.robot_name + '/franka_state_controller/franka_states', FrankaState,
-                         callback=self.franka_state_cb)
-        fs = rospy.wait_for_message(self.robot_name + '/franka_state_controller/franka_states', FrankaState)
-        # self.T_b2ee = np.array(fs.O_T_EE).reshape(4, 4).T
+
         self.pub_target_pose = rospy.Publisher('/panda_sim' + self.robot_name + '/shared_target_pose', PoseStamped, queue_size=1)
         # self.pub_target_q = rospy.Publisher('/panda_sim/panda1/shared_target_q', JointState, queue_size=1)
         self.rate = rospy.Rate(100)
@@ -37,12 +34,23 @@ class CartesianCmd:
         self.stiff_dict = dict()
         self.config_dict = self.dr_client.get_configuration()
 
+        self.F_ext_z_array = np.zeros(0)
+        fs = rospy.wait_for_message(self.robot_name + '/franka_state_controller/franka_states', FrankaState)
+        self.F_ext = np.asarray(fs.K_F_ext_hat_K)
+        rospy.Subscriber(self.robot_name + '/franka_state_controller/franka_states', FrankaState,
+                         callback=self.franka_state_cb)
+
     def dr_cb(self, config):
         # rospy.loginfo("Config set to {translational_stiffness}, {translational_damping}, {rotational_stiffness}, {rotational_damping}, {nullspace_stiffness}".format(**config))
         pass
 
     def franka_state_cb(self, msg: FrankaState):
-        # self.T_b2ee = np.array(msg.O_T_EE).reshape(4, 4).T
+        self.F_ext = np.asarray(msg.K_F_ext_hat_K)
+        if self.F_ext_z_array.shape[0] < 30:
+            self.F_ext_z_array = np.insert(self.F_ext_z_array, 0, self.F_ext[2])
+        else:
+            self.F_ext_z_array[1:] = self.F_ext_z_array[:-1]
+            self.F_ext_z_array[0] = self.F_ext[2]
         pass
 
     def get_cur_T(self):
